@@ -1,8 +1,9 @@
 // main.dart
 // App đo tốc độ bằng GPS - Flutter
-// Có nút tạm dừng/tiếp tục + bản đồ khi xoay ngang máy
+// Có đồng hồ kim (analog gauge), nút tạm dừng/tiếp tục, bản đồ khi xoay ngang máy
 
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -39,6 +40,9 @@ class SpeedHomePage extends StatefulWidget {
 class _SpeedHomePageState extends State<SpeedHomePage> {
   StreamSubscription<Position>? _positionStream;
   final MapController _mapController = MapController();
+
+  // Tốc độ tối đa hiển thị trên mặt đồng hồ kim (km/h) - chỉnh số này nếu muốn thang đo khác
+  static const double gaugeMaxSpeed = 200;
 
   double _speedKmh = 0.0;
   double _maxSpeedKmh = 0.0;
@@ -85,7 +89,6 @@ class _SpeedHomePageState extends State<SpeedHomePage> {
     _positionStream =
         Geolocator.getPositionStream(locationSettings: locationSettings)
             .listen((Position position) {
-      // Nếu đang tạm dừng, bỏ qua cập nhật, giữ nguyên số hiện tại
       if (_isPaused) return;
 
       final speedMs = position.speed < 0 ? 0.0 : position.speed;
@@ -101,13 +104,10 @@ class _SpeedHomePageState extends State<SpeedHomePage> {
         }
       });
 
-      // Nếu bản đồ đang hiển thị (đang xoay ngang), tự di chuyển camera theo vị trí mới
       if (_mapReady) {
         try {
           _mapController.move(newLatLng, _mapController.camera.zoom);
-        } catch (_) {
-          // Bỏ qua nếu map controller chưa gắn xong, tránh crash
-        }
+        } catch (_) {}
       }
     }, onError: (e) {
       setState(() => _status = 'Lỗi GPS: $e');
@@ -131,8 +131,47 @@ class _SpeedHomePageState extends State<SpeedHomePage> {
     super.dispose();
   }
 
-  // Widget hiển thị đồng hồ tốc độ (dùng chung cho cả 2 chế độ dọc/ngang)
-  Widget _buildSpeedDisplay() {
+  // Đồng hồ kim - vẽ tay bằng CustomPainter, không cần thêm package ngoài
+  Widget _buildSpeedGauge(double gaugeSize) {
+    return SizedBox(
+      width: gaugeSize,
+      height: gaugeSize,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          CustomPaint(
+            size: Size(gaugeSize, gaugeSize),
+            painter: SpeedGaugePainter(
+              speed: _speedKmh,
+              maxSpeed: gaugeMaxSpeed,
+            ),
+          ),
+          Positioned(
+            bottom: gaugeSize * 0.22,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _speedKmh.toStringAsFixed(0),
+                  style: TextStyle(
+                    fontSize: gaugeSize * 0.16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                const Text(
+                  'km/h',
+                  style: TextStyle(fontSize: 13, color: Colors.white70),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpeedDisplay(double gaugeSize) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -140,20 +179,9 @@ class _SpeedHomePageState extends State<SpeedHomePage> {
           _status,
           style: const TextStyle(color: Colors.grey, fontSize: 14),
         ),
-        const SizedBox(height: 16),
-        Text(
-          _speedKmh.toStringAsFixed(1),
-          style: const TextStyle(
-            fontSize: 80,
-            fontWeight: FontWeight.bold,
-            color: Colors.cyanAccent,
-          ),
-        ),
-        const Text(
-          'km/h',
-          style: TextStyle(fontSize: 22, color: Colors.white70),
-        ),
-        const SizedBox(height: 30),
+        const SizedBox(height: 8),
+        _buildSpeedGauge(gaugeSize),
+        const SizedBox(height: 12),
         Text(
           'Tốc độ tối đa: ${_maxSpeedKmh.toStringAsFixed(1)} km/h',
           style: const TextStyle(fontSize: 16, color: Colors.orangeAccent),
@@ -162,7 +190,7 @@ class _SpeedHomePageState extends State<SpeedHomePage> {
           'Độ chính xác GPS: ±${_accuracy.toStringAsFixed(1)} m',
           style: const TextStyle(fontSize: 13, color: Colors.grey),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -185,7 +213,6 @@ class _SpeedHomePageState extends State<SpeedHomePage> {
     );
   }
 
-  // Widget bản đồ, chỉ hiện khi xoay ngang
   Widget _buildMap() {
     if (_currentLatLng == null) {
       return const Center(
@@ -197,7 +224,6 @@ class _SpeedHomePageState extends State<SpeedHomePage> {
       );
     }
 
-    // Đánh dấu bản đồ đã sẵn sàng để bắt đầu tự động di chuyển camera
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_mapReady) {
         setState(() => _mapReady = true);
@@ -243,12 +269,11 @@ class _SpeedHomePageState extends State<SpeedHomePage> {
       body: OrientationBuilder(
         builder: (context, orientation) {
           if (orientation == Orientation.landscape) {
-            // Xoay ngang: chia đôi màn hình, trái là đồng hồ, phải là bản đồ
             return Row(
               children: [
                 Expanded(
                   flex: 1,
-                  child: Center(child: _buildSpeedDisplay()),
+                  child: Center(child: _buildSpeedDisplay(220)),
                 ),
                 const VerticalDivider(width: 1, color: Colors.white24),
                 Expanded(
@@ -258,10 +283,113 @@ class _SpeedHomePageState extends State<SpeedHomePage> {
               ],
             );
           }
-          // Chế độ dọc: chỉ hiện đồng hồ tốc độ như bình thường
-          return Center(child: _buildSpeedDisplay());
+          return Center(child: _buildSpeedDisplay(280));
         },
       ),
     );
+  }
+}
+
+// Lớp vẽ mặt đồng hồ kim + kim quay theo tốc độ hiện tại
+class SpeedGaugePainter extends CustomPainter {
+  final double speed;
+  final double maxSpeed;
+
+  SpeedGaugePainter({required this.speed, required this.maxSpeed});
+
+  static const double startAngleDeg = 135; // vị trí bắt đầu vòng cung (độ)
+  static const double sweepAngleDeg = 270; // độ rộng vòng cung, chừa khoảng trống phía dưới
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2 - 24;
+    final progress = (speed / maxSpeed).clamp(0.0, 1.0);
+
+    // Vòng cung nền màu xám mờ
+    final bgPaint = Paint()
+      ..color = Colors.white24
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 14
+      ..strokeCap = StrokeCap.round;
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      startAngleDeg * pi / 180,
+      sweepAngleDeg * pi / 180,
+      false,
+      bgPaint,
+    );
+
+    // Vòng cung màu thể hiện mức tốc độ hiện tại (xanh thấp -> đỏ cao)
+    final progressPaint = Paint()
+      ..color = Color.lerp(Colors.greenAccent, Colors.redAccent, progress)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 14
+      ..strokeCap = StrokeCap.round;
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      startAngleDeg * pi / 180,
+      sweepAngleDeg * pi / 180 * progress,
+      false,
+      progressPaint,
+    );
+
+    // Vạch chia số quanh mặt đồng hồ
+    final tickPaint = Paint()
+      ..color = Colors.white70
+      ..strokeWidth = 2;
+    const tickStep = 20;
+    final tickCount = (maxSpeed / tickStep).round();
+    for (int i = 0; i <= tickCount; i++) {
+      final tickValue = i * tickStep;
+      final angle = (startAngleDeg + sweepAngleDeg * (tickValue / maxSpeed)) * pi / 180;
+      final outerPoint = Offset(
+        center.dx + (radius + 10) * cos(angle),
+        center.dy + (radius + 10) * sin(angle),
+      );
+      final innerPoint = Offset(
+        center.dx + (radius - 8) * cos(angle),
+        center.dy + (radius - 8) * sin(angle),
+      );
+      canvas.drawLine(innerPoint, outerPoint, tickPaint);
+
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: '$tickValue',
+          style: const TextStyle(color: Colors.white70, fontSize: 11),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final labelPoint = Offset(
+        center.dx + (radius - 28) * cos(angle) - textPainter.width / 2,
+        center.dy + (radius - 28) * sin(angle) - textPainter.height / 2,
+      );
+      textPainter.paint(canvas, labelPoint);
+    }
+
+    // Kim đồng hồ
+    final needleAngle = (startAngleDeg + sweepAngleDeg * progress) * pi / 180;
+    final needleLength = radius - 22;
+    final needleEnd = Offset(
+      center.dx + needleLength * cos(needleAngle),
+      center.dy + needleLength * sin(needleAngle),
+    );
+    final needlePaint = Paint()
+      ..color = Colors.redAccent
+      ..strokeWidth = 4
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(center, needleEnd, needlePaint);
+
+    // Tâm kim
+    canvas.drawCircle(center, 8, Paint()..color = Colors.white);
+    canvas.drawCircle(center, 8, Paint()
+      ..color = Colors.black
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2);
+  }
+
+  @override
+  bool shouldRepaint(covariant SpeedGaugePainter oldDelegate) {
+    return oldDelegate.speed != speed || oldDelegate.maxSpeed != maxSpeed;
   }
 }
