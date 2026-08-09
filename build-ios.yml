@@ -38,21 +38,32 @@ jobs:
       - name: Cài lại package sau khi có khung project
         run: flutter pub get
 
-      - name: Build app iOS (không ký, vì máy đích đã jailbreak)
+      - name: Chuẩn bị cấu hình Xcode (pod install, không build)
+        run: flutter build ios --release --no-codesign --config-only
+
+      - name: Build thủ công bằng xcodebuild, ép tắt hẳn code signing
         run: |
-          export CODE_SIGNING_ALLOWED=NO
-          export CODE_SIGNING_REQUIRED=NO
-          export CODE_SIGNING_IDENTITY=""
-          flutter build ios --release --no-codesign
+          cd ios
+          xcodebuild -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_STYLE=Manual \
+            -derivedDataPath ../build/ios_manual \
+            clean build
 
       - name: Đóng gói thành file .ipa
         run: |
-          cd build/ios/iphoneos
+          cd build/ios_manual/Build/Products/Release-iphoneos
           mkdir -p Payload
           cp -r Runner.app Payload/Runner.app
           zip -r speedo_app.ipa Payload
           cd -
-          mv build/ios/iphoneos/speedo_app.ipa .
+          mv build/ios_manual/Build/Products/Release-iphoneos/speedo_app.ipa .
 
       - name: Upload file .ipa để tải về
         uses: actions/upload-artifact@v4
