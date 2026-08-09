@@ -24,23 +24,46 @@ jobs:
       - name: Cài package
         run: flutter pub get
 
-      - name: Sinh khung project iOS (nếu chưa có thư mục ios/)
-        run: |
-          if [ ! -d "ios" ]; then
-            flutter create . --platforms=ios
-          fi
+      - name: Sinh khung project iOS + Android tự động
+        run: flutter create . --platforms=ios,android --project-name speedo_app
 
-      - name: Build app iOS (không ký, vì máy đích đã jailbreak)
-        run: flutter build ios --release --no-codesign
+      - name: Đặt code vào đúng thư mục lib/ mà Flutter yêu cầu
+        run: |
+          mkdir -p lib
+          cp main.dart lib/main.dart
+
+      - name: Áp quyền GPS vào Info.plist (dùng file đã chuẩn bị sẵn trong repo)
+        run: cp Info.plist ios/Runner/Info.plist
+
+      - name: Cài lại package sau khi có khung project
+        run: flutter pub get
+
+      - name: Chuẩn bị cấu hình Xcode (pod install, không build)
+        run: flutter build ios --release --no-codesign --config-only
+
+      - name: Build thủ công bằng xcodebuild, ép tắt hẳn code signing
+        run: |
+          cd ios
+          xcodebuild -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_STYLE=Manual \
+            -derivedDataPath ../build/ios_manual \
+            clean build
 
       - name: Đóng gói thành file .ipa
         run: |
-          cd build/ios/iphoneos
+          cd build/ios_manual/Build/Products/Release-iphoneos
           mkdir -p Payload
           cp -r Runner.app Payload/Runner.app
           zip -r speedo_app.ipa Payload
           cd -
-          mv build/ios/iphoneos/speedo_app.ipa .
+          mv build/ios_manual/Build/Products/Release-iphoneos/speedo_app.ipa .
 
       - name: Upload file .ipa để tải về
         uses: actions/upload-artifact@v4
